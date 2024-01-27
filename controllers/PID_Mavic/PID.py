@@ -3,7 +3,7 @@ from typing import Any
 class PID(object):
     def __init__(self,kp,ki,kd,goal):
         self.kp, self.ki, self.kd = kp, ki, kd
-        self._p, self._i, self._d = None, None, None
+        self._p, self._i, self._d = 0, 0, 0
         self.goal = goal
         self.time = time.monotonic
         
@@ -17,7 +17,7 @@ class PID(object):
     def __call__(self, input_):
         
         now = self.time()
-        dt = now - self._prev_time if (now - self._prev_time) else 1e-16
+        dt = 1e-16 if (self._prev_time is None) else now - self._prev_time
 
         if self._prev_output is not None and dt < self.time_step:
             return self._prev_output
