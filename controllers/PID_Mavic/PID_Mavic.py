@@ -1,7 +1,6 @@
 from controller import Robot
-import sys
 import numpy as np
-
+import cv2
 
 def clamp(value, value_min, value_max):
     return min(max(value, value_min), value_max)
@@ -55,6 +54,7 @@ class Mavic(Robot):
 
         self.current_pose = 6 * [0]  # X, Y, Z, yaw, pitch, roll
         self.probs = [-1.0] * 5
+        self.probs[4]=2
         self.target_position = [0, 0, 0]
         self.target_index = 0
         self.target_altitude = 0
@@ -62,6 +62,7 @@ class Mavic(Robot):
         self.pitch_integral = 0.0
         self.prev_roll = 0.0
         self.prev_pitch = 0.0
+        self.is_landing = False
 
     def cnn(self, photo):
         pass
@@ -74,6 +75,9 @@ class Mavic(Robot):
 
     def set_probs_index(self,index):
         rets = [-1,-1,0,1,-1,-1,2,-1,3,4]
+        return rets[index]
+    def set_waypoint_index(self,index):
+        rets = [0,2,4,6,8]
         return rets[index]
     def check_position(self, yaw, target_index, position):
         
@@ -99,15 +103,19 @@ class Mavic(Robot):
             name = "photo" + str(self.set_probs_index(self.target_index)) + ".jpg"
             self.camera.saveImage(name, 100)
             processedimage = self.pre_process(self.camera.getImage())
-            self.probs[self.set_probs_index(self.target_index)] = self.cnn(processedimage)
+            #self.probs[self.set_probs_index(self.target_index)] = self.cnn(processedimage)
 
         # if the robot is at the position with a precision of target_precision
         if all([abs(x1 - x2) < self.target_precision for (x1, x2) in
                 zip(self.target_position, self.current_pose[0:2])]):
-
-            self.target_index += 1
+            if not self.is_landing:
+                self.target_index += 1
             if self.target_index > len(waypoints) - 1:
-                self.target_index = 0
+                print(self.probs)
+                self.target_index = self.set_waypoint_index(np.argmax(self.probs))
+                print(self.target_index)
+                print(waypoints[self.target_index])
+                self.is_landing = True
             self.target_position[0:2] = waypoints[self.target_index]
             if verbose_target:
                 print("Target reached! New target: ",
@@ -138,6 +146,7 @@ class Mavic(Robot):
 
     def run(self):
         t1 = self.getTime()
+        t_altitude = self.getTime()
 
         roll_disturbance = 0
         pitch_disturbance = 0
@@ -154,12 +163,17 @@ class Mavic(Robot):
 
         while self.step(self.time_step) != -1:
 
+            if self.target_altitude < 0.4:
+                break
             # Read sensors
             roll, pitch, yaw = self.imu.getRollPitchYaw()
             x_pos, y_pos, altitude = self.gps.getValues()
             roll_acceleration, pitch_acceleration, _ = self.gyro.getValues()
             self.set_position([x_pos, y_pos, altitude, roll, pitch, yaw])
-
+            if self.is_landing and self.getTime() - t_altitude > 3 :
+                t_altitude = self.getTime()
+                self.target_altitude -= 0.1
+                
             if altitude > self.target_altitude - 1:
                 # as soon as it reach the target altitude, compute the disturbances to go to the given waypoints.
                 if self.getTime() - t1 > 0.1:
@@ -206,3 +220,8 @@ class Mavic(Robot):
 # with a linear and angular damping both of 0.5
 robot = Mavic()
 robot.run()
+
+robot.front_left_motor.setVelocity(0)
+robot.front_right_motor.setVelocity(0)
+robot.rear_left_motor.setVelocity(0)
+robot.rear_right_motor.setVelocity(0)
