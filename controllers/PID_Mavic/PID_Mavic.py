@@ -43,6 +43,9 @@ class Mavic(Robot):
         self.gps.enable(self.time_step)
         self.gyro = self.getDevice("gyro")
         self.gyro.enable(self.time_step)
+        self.fl_led = self.getDevice("front left led")
+        self.fr_led = self.getDevice("front right led")
+
 
         self.front_left_motor = self.getDevice("front left propeller")
         self.front_right_motor = self.getDevice("front right propeller")
@@ -167,6 +170,8 @@ class Mavic(Robot):
         self.imgs[num] = cv2.imread(self.PATH[num])
         self.imgs[num] = self.crop_image(self.imgs[num])
         self.imgs[num] = self.black_back(self.add_border(self.crop(self.PATH[num])))
+        cv2.imshow("image",self.imgs[num])
+        cv2.waitKey()
         self.imgs[num] = cv2.resize(self.imgs[num], (28, 28))
 
     def set_position(self, pos):
@@ -199,10 +204,11 @@ class Mavic(Robot):
                 print("First target: ", self.target_position[0:2])
 
         if self.check_position(yaw, self.target_index, self.current_pose[0:2]):
-            name = "photo" + str(self.set_probs_index(self.target_index)) + ".jpg"
-            self.camera.saveImage(name, 100)
-            self.pre_process(self.set_probs_index(self.target_index))
-            self.probs[self.set_probs_index(self.target_index)] = self.cnn(self.imgs[self.set_probs_index(self.target_index)],0)
+            if self.probs[self.set_probs_index(self.target_index)] == -1 :
+                name = "photo" + str(self.set_probs_index(self.target_index)) + ".jpg"
+                self.camera.saveImage(name, 100)
+                self.pre_process(self.set_probs_index(self.target_index))
+                self.probs[self.set_probs_index(self.target_index)] = self.cnn(self.imgs[self.set_probs_index(self.target_index)],4)
 
         # if the robot is at the position with a precision of target_precision
         if all([abs(x1 - x2) < self.target_precision for (x1, x2) in
@@ -212,6 +218,8 @@ class Mavic(Robot):
             if self.target_index > len(waypoints) - 1:
                 self.target_index = self.set_waypoint_index(np.argmax(self.probs))
                 self.is_landing = True
+                self.fl_led.set(1)
+                self.fr_led.set(1)
             self.target_position[0:2] = waypoints[self.target_index]
             if verbose_target:
                 print("Target reached! New target: ",
