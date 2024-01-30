@@ -1,20 +1,25 @@
 from controller import Robot
 import sys
-import PID
 import numpy as np
+
 
 def clamp(value, value_min, value_max):
     return min(max(value, value_min), value_max)
 
 
-class Mavic (Robot):
+class Mavic(Robot):
     # Constants, empirically found.
     K_VERTICAL_THRUST = 68.5  # with this thrust, the drone lifts.
     # Vertical offset where the robot actually targets to stabilize itself.
     K_VERTICAL_OFFSET = 0.6
-    K_VERTICAL_P = 3.0      # P constant of the vertical PID.
-    K_ROLL_P = 50.0           # P constant of the roll PID.
-    K_PITCH_P = 30.0          # P constant of the pitch PID.
+    K_VERTICAL_P = 3.0  # P constant of the vertical PID.
+    K_ROLL_P = 50.0  # P constant of the roll PID.
+    K_PITCH_P = 30.0  # P constant of the pitch PID.
+    K_ROLL_I = 1.0
+    K_PITCH_I = 1.0
+    K_ROLL_D = 3.0
+    K_PITCH_D = 3.0
+    INTEGRAL_LIMIT = 0.1
 
     MAX_YAW_DISTURBANCE = 0.4
     MAX_PITCH_DISTURBANCE = -1
@@ -35,7 +40,6 @@ class Mavic (Robot):
         self.gps.enable(self.time_step)
         self.gyro = self.getDevice("gyro")
         self.gyro.enable(self.time_step)
-        
 
         self.front_left_motor = self.getDevice("front left propeller")
         self.front_right_motor = self.getDevice("front right propeller")
@@ -54,42 +58,49 @@ class Mavic (Robot):
         self.target_position = [0, 0, 0]
         self.target_index = 0
         self.target_altitude = 0
-    
-    def cnn(self,photo):
+        self.roll_integral = 0.0
+        self.pitch_integral = 0.0
+        self.prev_roll = 0.0
+        self.prev_pitch = 0.0
+
+    def cnn(self, photo):
         pass
-    def pre_process(self,photo):
+
+    def pre_process(self, photo):
         pass
+
     def set_position(self, pos):
         self.current_pose = pos
-        
-    def check_position(self,target_index,position):
-        #retruns bool
+
+    def check_position(self, target_index, position):
+        # retruns bool
         if target_index == 0:
             return (-5.4 < position[0] < -5.0) and (3.4 < position[1] < 3.8)
         elif target_index == 1:
             return (-3.7 < position[0] < -3.3) and (-2.8 < position[1] < -2.4)
         elif target_index == 2:
-            return (2.6 < position[0] < 2.8) and (-2.8 < position[1] < -2.4)
+            return (2.6 < position[0] < 2.8) and (-3.0 < position[1] < -2.6)
         elif target_index == 3:
             return (5.5 < position[0] < 5.8) and (0.1 < position[1] < 0.5)
         elif target_index == 4:
             return (1.5 < position[0] < 1.7) and (4.6 < position[1] < 4.8)
-            
+
     def move_to_target(self, waypoints, verbose_movement=False, verbose_target=False):
         if self.target_position[0:2] == [0, 0]:  # Initialization
             self.target_position[0:2] = waypoints[0]
             if verbose_target:
                 print("First target: ", self.target_position[0:2])
 
-        if self.check_position(self.target_index,self.current_pose[0:2]):
-            name = "photo"+str(self.target_index)+".jpg"
-            self.camera.saveImage(name,100)
+        if self.check_position(self.target_index, self.current_pose[0:2]):
+            name = "photo" + str(self.target_index) + ".jpg"
+            self.camera.saveImage(name, 100)
             processedimage = self.pre_process(self.camera.getImage())
             self.probs[self.target_index] = self.cnn(processedimage)
 
         # if the robot is at the position with a precision of target_precision
-        if all([abs(x1 - x2) < self.target_precision for (x1, x2) in zip(self.target_position, self.current_pose[0:2])]):
-            
+        if all([abs(x1 - x2) < self.target_precision for (x1, x2) in
+                zip(self.target_position, self.current_pose[0:2])]):
+
             self.target_index += 1
             if self.target_index > len(waypoints) - 1:
                 self.target_index = 0
@@ -116,7 +127,7 @@ class Mavic (Robot):
 
         if verbose_movement:
             distance_left = np.sqrt(((self.target_position[0] - self.current_pose[0]) ** 2) + (
-                (self.target_position[1] - self.current_pose[1]) ** 2))
+                    (self.target_position[1] - self.current_pose[1]) ** 2))
             print("remaning angle: {:.4f}, remaning distance: {:.4f}".format(
                 angle_left, distance_left))
         return yaw_disturbance, pitch_disturbance
@@ -124,13 +135,12 @@ class Mavic (Robot):
     def run(self):
         t1 = self.getTime()
 
-        
         roll_disturbance = 0
         pitch_disturbance = 0
         yaw_disturbance = 0
 
         # Specify the patrol coordinates
-        waypoints = [[-5, 4], [-3, -2], [3, -3.5], [5, 0],[2,5]]
+        waypoints = [[-5, 4], [-3, -2], [3, -3.5], [5, 0], [2, 5]]
         # target altitude of the robot in meters
         self.target_altitude = 3
 
@@ -147,11 +157,25 @@ class Mavic (Robot):
                 if self.getTime() - t1 > 0.1:
                     yaw_disturbance, pitch_disturbance = self.move_to_target(
                         waypoints,
-                        verbose_target = True)
+                        verbose_target=True)
                     t1 = self.getTime()
 
-            roll_input = self.K_ROLL_P * clamp(roll, -1, 1) + roll_acceleration + roll_disturbance
-            pitch_input = self.K_PITCH_P * clamp(pitch, -1, 1) + pitch_acceleration + pitch_disturbance
+            roll_error = clamp(roll, -1, 1)
+            pitch_error = clamp(pitch, -1, 1)
+
+            self.pitch_integral += pitch_error
+            self.pitch_integral = clamp(self.pitch_integral,-self.INTEGRAL_LIMIT,self.INTEGRAL_LIMIT)
+            self.roll_integral += roll_error
+            self.roll_integral = clamp(self.roll_integral,-self.INTEGRAL_LIMIT,self.INTEGRAL_LIMIT)
+
+            roll_input = self.K_ROLL_P * roll_error \
+                         + self.K_ROLL_I * self.roll_integral \
+                         + self.K_ROLL_D * (roll_error - self.prev_roll) \
+                         + roll_acceleration + roll_disturbance
+            pitch_input = self.K_PITCH_P * pitch_error \
+                          + self.K_PITCH_I * self.pitch_integral \
+                          + self.K_PITCH_D * (pitch_error - self.prev_pitch) \
+                          + pitch_acceleration + pitch_disturbance
             yaw_input = yaw_disturbance
             clamped_difference_altitude = clamp(self.target_altitude - altitude + self.K_VERTICAL_OFFSET, -1, 1)
             vertical_input = self.K_VERTICAL_P * pow(clamped_difference_altitude, 3.0)
@@ -165,6 +189,9 @@ class Mavic (Robot):
             self.front_right_motor.setVelocity(-front_right_motor_input)
             self.rear_left_motor.setVelocity(-rear_left_motor_input)
             self.rear_right_motor.setVelocity(rear_right_motor_input)
+
+            self.prev_roll = roll_error
+            self.prev_pitch = pitch_error
 
 
 # To use this controller, the basicTimeStep should be set to 8 and the defaultDamping
