@@ -72,6 +72,9 @@ class Mavic(Robot):
     def set_position(self, pos):
         self.current_pose = pos
 
+    def set_probs_index(self,index):
+        rets = [-1,-1,0,1,-1,-1,2,-1,3,4]
+        return rets[index]
     def check_position(self, yaw, target_index, position):
         
         # retruns bool
@@ -93,10 +96,10 @@ class Mavic(Robot):
                 print("First target: ", self.target_position[0:2])
 
         if self.check_position(yaw, self.target_index, self.current_pose[0:2]):
-            name = "photo" + str(self.target_index) + ".jpg"
+            name = "photo" + str(self.set_probs_index(self.target_index)) + ".jpg"
             self.camera.saveImage(name, 100)
             processedimage = self.pre_process(self.camera.getImage())
-            self.probs[0] = self.cnn(processedimage)
+            self.probs[self.set_probs_index(self.target_index)] = self.cnn(processedimage)
 
         # if the robot is at the position with a precision of target_precision
         if all([abs(x1 - x2) < self.target_precision for (x1, x2) in
@@ -162,8 +165,7 @@ class Mavic(Robot):
                 if self.getTime() - t1 > 0.1:
                     yaw_disturbance, pitch_disturbance = self.move_to_target(
                         yaw,
-                        waypoints,
-                        verbose_target=True)
+                        waypoints)
                     t1 = self.getTime()
 
             roll_error = clamp(roll, -1, 1)
