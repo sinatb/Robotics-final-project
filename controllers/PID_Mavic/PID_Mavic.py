@@ -72,30 +72,31 @@ class Mavic(Robot):
     def set_position(self, pos):
         self.current_pose = pos
 
-    def check_position(self, target_index, position):
+    def check_position(self, yaw, target_index, position):
+        
         # retruns bool
-        if target_index == 0:
-            return (-5.4 < position[0] < -5.0) and (3.4 < position[1] < 3.8)
-        elif target_index == 1:
-            return (-3.7 < position[0] < -3.3) and (-2.8 < position[1] < -2.4)
-        elif target_index == 2:
-            return (2.6 < position[0] < 2.8) and (-3.0 < position[1] < -2.6)
+        if target_index == 2:
+            return (-4.8 < position[0] < -4.4) and (3.9 < position[1] < 4.2) and (3.10 < yaw < 3.14)
         elif target_index == 3:
-            return (5.5 < position[0] < 5.8) and (0.1 < position[1] < 0.5)
-        elif target_index == 4:
-            return (1.5 < position[0] < 1.7) and (4.6 < position[1] < 4.8)
+            return (-2.7 < position[0] < -2.5) and (-2.5 < position[1] < -2.3) and (-3.12<yaw<-3.10)
+        elif target_index == 6:
+            return (3.2 < position[0] < 3.4) and (-3.7 < position[1] < -3.5) and (-3.13<yaw<-3.11)
+        elif target_index == 8:
+            return (5.20 < position[0] < 5.40) and (-0.5 < position[1] < -0.2) and (-3.13<yaw<-3.11)
+        elif target_index == 9:
+            return (2.4 < position[0] < 2.5) and (5.4 < position[1] < 5.5) and (-3.13<yaw<-3.11)
 
-    def move_to_target(self, waypoints, verbose_movement=False, verbose_target=False):
+    def move_to_target(self, yaw, waypoints, verbose_movement=False, verbose_target=False):
         if self.target_position[0:2] == [0, 0]:  # Initialization
             self.target_position[0:2] = waypoints[0]
             if verbose_target:
                 print("First target: ", self.target_position[0:2])
 
-        if self.check_position(self.target_index, self.current_pose[0:2]):
+        if self.check_position(yaw, self.target_index, self.current_pose[0:2]):
             name = "photo" + str(self.target_index) + ".jpg"
             self.camera.saveImage(name, 100)
             processedimage = self.pre_process(self.camera.getImage())
-            self.probs[self.target_index] = self.cnn(processedimage)
+            self.probs[0] = self.cnn(processedimage)
 
         # if the robot is at the position with a precision of target_precision
         if all([abs(x1 - x2) < self.target_precision for (x1, x2) in
@@ -140,7 +141,11 @@ class Mavic(Robot):
         yaw_disturbance = 0
 
         # Specify the patrol coordinates
-        waypoints = [[-5, 4], [-3, -2], [3, -3.5], [5, 0], [2, 5]]
+        waypoints = [[-4, 4], [-5, 4]
+                    ,[-1,-1.6],[-3, -2], 
+                     [4,-1.5],[3, -3.5],
+                     [7,0],[5, 0],
+                     [4,5],[2, 5]]
         # target altitude of the robot in meters
         self.target_altitude = 3
 
@@ -156,6 +161,7 @@ class Mavic(Robot):
                 # as soon as it reach the target altitude, compute the disturbances to go to the given waypoints.
                 if self.getTime() - t1 > 0.1:
                     yaw_disturbance, pitch_disturbance = self.move_to_target(
+                        yaw,
                         waypoints,
                         verbose_target=True)
                     t1 = self.getTime()
@@ -164,9 +170,9 @@ class Mavic(Robot):
             pitch_error = clamp(pitch, -1, 1)
 
             self.pitch_integral += pitch_error
-            self.pitch_integral = clamp(self.pitch_integral,-self.INTEGRAL_LIMIT,self.INTEGRAL_LIMIT)
+            self.pitch_integral = clamp(self.pitch_integral, -self.INTEGRAL_LIMIT, self.INTEGRAL_LIMIT)
             self.roll_integral += roll_error
-            self.roll_integral = clamp(self.roll_integral,-self.INTEGRAL_LIMIT,self.INTEGRAL_LIMIT)
+            self.roll_integral = clamp(self.roll_integral, -self.INTEGRAL_LIMIT, self.INTEGRAL_LIMIT)
 
             roll_input = self.K_ROLL_P * roll_error \
                          + self.K_ROLL_I * self.roll_integral \
