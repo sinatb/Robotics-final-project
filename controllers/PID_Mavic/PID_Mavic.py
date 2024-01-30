@@ -1,6 +1,7 @@
 from controller import Robot
 import numpy as np
 import cv2
+import tensorflow as tf
 
 def clamp(value, value_min, value_max):
     return min(max(value, value_min), value_max)
@@ -22,6 +23,9 @@ class Mavic(Robot):
 
     MAX_YAW_DISTURBANCE = 0.4
     MAX_PITCH_DISTURBANCE = -1
+
+    PATH = ['photo0.jpg','photo1.jpg','photo2.jpg','photo3.jpg','photo4.jpg']
+
     # Precision between the target position and the robot position in meters
     target_precision = 0.4
 
@@ -54,7 +58,6 @@ class Mavic(Robot):
 
         self.current_pose = 6 * [0]  # X, Y, Z, yaw, pitch, roll
         self.probs = [-1.0] * 5
-        self.probs[4]=2
         self.target_position = [0, 0, 0]
         self.target_index = 0
         self.target_altitude = 0
@@ -64,11 +67,107 @@ class Mavic(Robot):
         self.prev_pitch = 0.0
         self.is_landing = False
 
-    def cnn(self, photo):
-        pass
+        self.imgs = [None,None,None,None,None]
+    def crop_image(self,image, left=44, right=2, top=14, bottom=74):
+        height, width, _ = image.shape
+        cropped = image[top:height - bottom, left:width - right, :]
+        return cropped
+    def is_gray(self,r, g, b):
+        if r == g == b:
+            return True
 
-    def pre_process(self, photo):
-        pass
+        tolerance = 20
+        if abs(r - g) <= tolerance and abs(g - b) <= tolerance and abs(b - r) <= tolerance:
+            return True
+
+        return False
+    def add_border(self,image, border_size=10):
+        height, width = image.shape[:2]
+        bordered_image = cv2.rectangle(
+            image,
+            (0, 0),
+            (width - 1, height - 1),
+            (0, 0, 0),
+            border_size
+        )
+        return bordered_image
+    def crop(self,path):
+        image = cv2.imread(path)
+        for i in range(image.shape[0]):
+            for j in range(image.shape[1]):
+                r, g, b = image[i][j]
+                if b > 80 and not self.is_gray(r, g, b):
+                    image[i][j] = 140
+
+        for i in range(image.shape[0]):
+            for j in range(image.shape[1]):
+                r, g, b = image[i][j]
+                r = int(r)
+                g = int(g)
+                b = int(b)
+                if (r + g + b) // 3 < 70:
+                    image[i][j] = 0
+        for i in range(image.shape[0]):
+            for j in range(image.shape[1]):
+                r, g, b = image[i][j]
+                r = int(r)
+                g = int(g)
+                b = int(b)
+                avg = (r + g + b) // 3
+                if avg > 140:
+                    image[i][j] = 10
+        for i in range(image.shape[0]):
+            for j in range(image.shape[1]):
+                r, g, b = image[i][j]
+                r = int(r)
+                g = int(g)
+                b = int(b)
+                avg = (r + g + b) // 3
+                if avg > 70:
+                    image[i][j] = int(min(avg + 100, 200))
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        image = cv2.threshold(gray, 70, 255, cv2.THRESH_OTSU)[1]
+        image = cv2.medianBlur(image, 11)
+        contours, h = cv2.findContours(image, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        cnts = []
+        m = -1
+        min_x = 100000000
+        min_y = 100000000
+        max_x = -1
+        max_y = -1
+        for c in contours:
+            area = cv2.contourArea(c)
+            m = max(m, area)
+            if 2000 < area < 60000:
+                for cc in c:
+                    x, y = cc.T
+                    x = x[0]
+                    y = y[0]
+                    min_x = min(min_x, x)
+                    min_y = min(min_y, y)
+                    max_x = max(max_x, x)
+                    max_y = max(max_y, y)
+                cnts.append(c)
+        if abs(min_x - max_x) < 60:
+            max_x += 100
+            min_x += 10
+        original = cv2.imread(path)
+        cropped = original[min_y:max_y, min_x:max_x]
+        return cropped
+    def black_back(self,image, thresh=95):
+      gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+      gray[gray < thresh] = 0
+      return gray
+    def cnn(self, photo, class_pred):
+        model = tf.keras.models.load_model(r'D:\works\study\Term-7\Robotics\Robotics-final-project\controllers\PID_Mavic\sag_model.h5')
+        predictions = model.predict(photo.reshape(-1, 28,28,1))
+        return predictions[0][class_pred]
+
+    def pre_process(self,num):
+        self.imgs[num] = cv2.imread(self.PATH[num])
+        self.imgs[num] = self.crop_image(self.imgs[num])
+        self.imgs[num] = self.black_back(self.add_border(self.crop(self.PATH[num])))
+        self.imgs[num] = cv2.resize(self.imgs[num], (28, 28))
 
     def set_position(self, pos):
         self.current_pose = pos
@@ -80,7 +179,7 @@ class Mavic(Robot):
         rets = [0,2,4,6,8]
         return rets[index]
     def check_position(self, yaw, target_index, position):
-        
+
         # retruns bool
         if target_index == 2:
             return (-4.8 < position[0] < -4.4) and (3.9 < position[1] < 4.2) and (3.10 < yaw < 3.14)
@@ -102,8 +201,8 @@ class Mavic(Robot):
         if self.check_position(yaw, self.target_index, self.current_pose[0:2]):
             name = "photo" + str(self.set_probs_index(self.target_index)) + ".jpg"
             self.camera.saveImage(name, 100)
-            processedimage = self.pre_process(self.camera.getImage())
-            #self.probs[self.set_probs_index(self.target_index)] = self.cnn(processedimage)
+            self.pre_process(self.set_probs_index(self.target_index))
+            self.probs[self.set_probs_index(self.target_index)] = self.cnn(self.imgs[self.set_probs_index(self.target_index)],0)
 
         # if the robot is at the position with a precision of target_precision
         if all([abs(x1 - x2) < self.target_precision for (x1, x2) in
@@ -111,10 +210,7 @@ class Mavic(Robot):
             if not self.is_landing:
                 self.target_index += 1
             if self.target_index > len(waypoints) - 1:
-                print(self.probs)
                 self.target_index = self.set_waypoint_index(np.argmax(self.probs))
-                print(self.target_index)
-                print(waypoints[self.target_index])
                 self.is_landing = True
             self.target_position[0:2] = waypoints[self.target_index]
             if verbose_target:
