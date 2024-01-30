@@ -1,10 +1,7 @@
 from controller import Robot
 import sys
-try:
-    import numpy as np
-except ImportError:
-    sys.exit("Warning: 'numpy' module not found.")
-
+import PID
+import numpy as np
 
 def clamp(value, value_min, value_max):
     return min(max(value, value_min), value_max)
@@ -58,7 +55,9 @@ class Mavic (Robot):
         self.target_index = 0
         self.target_altitude = 0
     
-    def CNN(self,photo):
+    def cnn(self,photo):
+        pass
+    def pre_process(self,photo):
         pass
     def set_position(self, pos):
         self.current_pose = pos
@@ -66,15 +65,15 @@ class Mavic (Robot):
     def check_position(self,target_index,position):
         #retruns bool
         if target_index == 0:
-            return (position[0] > -5.4 and position[0] < -5.0) and (position[1] > 3.4 and position[1] < 3.8)
+            return (-5.4 < position[0] < -5.0) and (3.4 < position[1] < 3.8)
         elif target_index == 1:
-            return (position[0] > -3.7 and position[0] < -3.3) and (position[1] > -2.8 and position[1] < -2.4)
+            return (-3.7 < position[0] < -3.3) and (-2.8 < position[1] < -2.4)
         elif target_index == 2:
-            return (position[0] > 2.6 and position[0] < 2.8) and (position[1] > -2.8 and position[1] < -2.4)
+            return (2.6 < position[0] < 2.8) and (-2.8 < position[1] < -2.4)
         elif target_index == 3:
-            return (position[0] > 5.5 and position[0] < 5.8) and (position[1] > 0.1 and position[1] < 0.5)
+            return (5.5 < position[0] < 5.8) and (0.1 < position[1] < 0.5)
         elif target_index == 4:
-            return (position[0] > 1.5 and position[0] < 1.7) and (position[1] > 4.6 and position[1] < 4.8)
+            return (1.5 < position[0] < 1.7) and (4.6 < position[1] < 4.8)
             
     def move_to_target(self, waypoints, verbose_movement=False, verbose_target=False):
         if self.target_position[0:2] == [0, 0]:  # Initialization
@@ -85,7 +84,8 @@ class Mavic (Robot):
         if self.check_position(self.target_index,self.current_pose[0:2]):
             name = "photo"+str(self.target_index)+".jpg"
             self.camera.saveImage(name,100)
-            self.probs[self.target_index] = self.CNN(name)
+            processedimage = self.pre_process(self.camera.getImage())
+            self.probs[self.target_index] = self.cnn(processedimage)
 
         # if the robot is at the position with a precision of target_precision
         if all([abs(x1 - x2) < self.target_precision for (x1, x2) in zip(self.target_position, self.current_pose[0:2])]):
@@ -105,12 +105,12 @@ class Mavic (Robot):
         angle_left = self.target_position[2] - self.current_pose[5]
         # Normalize turn angle to ]-pi;pi]
         angle_left = (angle_left + 2 * np.pi) % (2 * np.pi)
-        if (angle_left > np.pi):
+        if angle_left > np.pi:
             angle_left -= 2 * np.pi
 
         # Turn the robot to the left or to the right according the value and the sign of angle_left
         yaw_disturbance = self.MAX_YAW_DISTURBANCE * angle_left / (2 * np.pi)
-        # non proportional and decreasing function
+        # non-proportional and decreasing function
         pitch_disturbance = clamp(
             np.log10(abs(angle_left)), self.MAX_PITCH_DISTURBANCE, 0.1)
 
