@@ -75,15 +75,6 @@ class Mavic(Robot):
         height, width, _ = image.shape
         cropped = image[top:height - bottom, left:width - right, :]
         return cropped
-    def is_gray(self,r, g, b):
-        if r == g == b:
-            return True
-
-        tolerance = 20
-        if abs(r - g) <= tolerance and abs(g - b) <= tolerance and abs(b - r) <= tolerance:
-            return True
-
-        return False
     def add_border(self,image, border_size=10):
         height, width = image.shape[:2]
         bordered_image = cv2.rectangle(
@@ -94,51 +85,41 @@ class Mavic(Robot):
             border_size
         )
         return bordered_image
-    def crop(self,path):
+    
+    def find_square(self,path):
         image = cv2.imread(path)
-        for i in range(image.shape[0]):
-            for j in range(image.shape[1]):
-                r, g, b = image[i][j]
-                if b > 80 and not self.is_gray(r, g, b):
-                    image[i][j] = 140
+        main = image.copy()
 
         for i in range(image.shape[0]):
             for j in range(image.shape[1]):
                 r, g, b = image[i][j]
-                r = int(r)
-                g = int(g)
-                b = int(b)
-                if (r + g + b) // 3 < 70:
+                if b > 80 and not (abs(r - g) <= 20 and abs(g - b) <= 20 and abs(b - r) <= 20):
+                    image[i][j] = 140
+        for i in range(image.shape[0]):
+            for j in range(image.shape[1]):
+                r, g, b = image[i][j]
+                if (int(r) + int(g) + int(b)) // 3 < 70:
                     image[i][j] = 0
         for i in range(image.shape[0]):
             for j in range(image.shape[1]):
                 r, g, b = image[i][j]
-                r = int(r)
-                g = int(g)
-                b = int(b)
-                avg = (r + g + b) // 3
-                if avg > 140:
+                if (int(r) + int(g) + int(b)) // 3 > 140:
                     image[i][j] = 10
         for i in range(image.shape[0]):
             for j in range(image.shape[1]):
                 r, g, b = image[i][j]
-                r = int(r)
-                g = int(g)
-                b = int(b)
-                avg = (r + g + b) // 3
-                if avg > 70:
-                    image[i][j] = int(min(avg + 100, 200))
+                a = (int(r) + int(g) + int(b)) // 3
+                if a > 70:
+                    image[i][j] = int(min(a + 100, 200))
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         image = cv2.threshold(gray, 70, 255, cv2.THRESH_OTSU)[1]
         image = cv2.medianBlur(image, 11)
-        contours, h = cv2.findContours(image, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        ctrs, _ = cv2.findContours(image, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         cnts = []
         m = -1
-        min_x = 100000000
-        min_y = 100000000
-        max_x = -1
-        max_y = -1
-        for c in contours:
+        min_x = min_y = float('inf')
+        max_x = max_y = -1
+        for c in ctrs:
             area = cv2.contourArea(c)
             m = max(m, area)
             if 2000 < area < 60000:
@@ -154,8 +135,7 @@ class Mavic(Robot):
         if abs(min_x - max_x) < 60:
             max_x += 100
             min_x += 10
-        original = cv2.imread(path)
-        cropped = original[min_y:max_y, min_x:max_x]
+        cropped = main[min_y:max_y, min_x:max_x]
         return cropped
     def black_back(self,image, thresh=95):
       gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -169,7 +149,7 @@ class Mavic(Robot):
     def pre_process(self,num):
         self.imgs[num] = cv2.imread(self.PATH[num])
         self.imgs[num] = self.crop_image(self.imgs[num])
-        self.imgs[num] = self.black_back(self.add_border(self.crop(self.PATH[num])))
+        self.imgs[num] = self.black_back(self.add_border(self.find_square(self.PATH[num])))
         cv2.imshow("image",self.imgs[num])
         cv2.waitKey()
         self.imgs[num] = cv2.resize(self.imgs[num], (28, 28))
